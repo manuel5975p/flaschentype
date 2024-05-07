@@ -38,5 +38,6 @@ struct Font{
     FT_Face face;
     Font(std::string font_name, int res);
 };
+text_image draw_text(const std::string& _text, const Font& font)
 extern FT_Library* ft;
 #endif
