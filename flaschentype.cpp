@@ -143,7 +143,7 @@ Font::Font(std::string font_name, int res){
 }
 text_image draw_text(const std::string& _text, const Font& font) {
     float xOffset = 0;
-    float scale = font.scale;
+    //float scale = font.scale;
     
     int max_keller = 0;
     int width = 0;
@@ -189,7 +189,6 @@ text_image draw_text(const std::string& _text, const Font& font) {
         auto it = font.character_map.find(c);
 
         if (it != font.character_map.end()) {
-            int cn = GetCodepointNext(text, &bytes);
             int kernoffset = 0;
             if(*text){
                 int cn = GetCodepointNext(text, &bytes);
