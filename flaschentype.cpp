@@ -4,11 +4,13 @@
 #include <iostream>
 #include <memory>
 #include <cstring>
+#include "ebg.hpp"
+
 void draw_glyph_at(text_image& img, int x, int baseline_descent, const Character& c){
     //std::cout << c.Bearing[1] << " vs " << c.Size[1] << "\n";
     for(int i = 0;i < c.Size[1];i++){
         for(int j = 0;j < c.Size[0];j++){
-            img(i - c.Bearing[1] + baseline_descent, j + c.Bearing[0] + x) = c.buffer[i * c.Size[0] + j];
+            img(i - c.Bearing[1] + baseline_descent, j + c.Bearing[0] + x) += c.buffer[i * c.Size[0] + j];
         }
     }
 }
@@ -49,6 +51,50 @@ int GetCodepointNext(const char *text, int *codepointSize){
     return codepoint;
 }
 FT_Library* ft = nullptr;
+Font::Font(int res){
+    if(ft == nullptr){
+        ft = new FT_Library;
+            if (FT_Init_FreeType(ft)){
+            std::cout << "ERROR::FREETYPE: Could not init FreeType Library" << std::endl;
+            exit(1);
+        }
+    }
+    
+    scale = res;
+    
+
+    // load font as face
+    if (FT_New_Memory_Face(*ft, EBGaramond_Regular_Kern_ttf, EBGaramond_Regular_Kern_ttf_len, 0, &face)) {
+        std::cerr << "ERROR::FREETYPE: Failed to load embedded font\n";
+        exit(1);
+    }
+    FT_Set_Pixel_Sizes(face, 0, res);
+    for(int i = 0;i < 256;i++){
+        //std::cout << i <<  "\n";
+        if (FT_Load_Char(face, i, FT_LOAD_RENDER)){
+            std::cout << "ERROR::FREETYTPE: Failed to load Glyph: " << i << std::endl;
+            //exit(1);
+        }
+        else{
+            //std::cerr << size_t(face->glyph->bitmap.buffer) << "\n";
+            Character character = {
+                std::array<int, 2>{(int)face->glyph->bitmap.width,(int)face->glyph->bitmap.rows},
+                std::array<int, 2>{(int)face->glyph->bitmap_left, (int)face->glyph->bitmap_top },
+                static_cast<unsigned int>(face->glyph->advance.x),
+                [this]{
+                    std::unique_ptr<char[]> ret = std::make_unique<char[]>(face->glyph->bitmap.width * face->glyph->bitmap.rows);
+                    if(face->glyph->bitmap.buffer != nullptr)
+                        std::memcpy(ret.get(), face->glyph->bitmap.buffer, face->glyph->bitmap.width * face->glyph->bitmap.rows);
+                    else
+                        std::fill(ret.get(), ret.get() + face->glyph->bitmap.width * face->glyph->bitmap.rows, 0);
+                    return ret;
+                }()
+            };
+            character_map[i] = std::move(character);
+        }
+    }
+
+}
 Font::Font(std::string font_name, int res){
     if(ft == nullptr){
         ft = new FT_Library;
@@ -92,7 +138,6 @@ Font::Font(std::string font_name, int res){
                 }()
             };
             character_map[i] = std::move(character);
-            //int out = stbi_write_png((std::to_string(i) + std::string(".png")).c_str(), face->glyph->bitmap.width, face->glyph->bitmap.rows, 1, face->glyph->bitmap.buffer, face->glyph->bitmap.width);
         }
     }
 }
@@ -110,13 +155,28 @@ text_image draw_text(const std::string& _text, const Font& font) {
         if(*text == 0)break;
         int c = GetCodepointNext(text, &bytes);
         text += bytes;
+        int kernoffset = 0;
+        if(*text){
+            int cn = GetCodepointNext(text, &bytes);
+            FT_Vector kerning;
+            FT_UInt glyph1 = FT_Get_Char_Index(font.face, c);
+            FT_UInt glyph2 = FT_Get_Char_Index(font.face, cn);
+            FT_Get_Kerning(font.face, glyph1, glyph2, FT_KERNING_DEFAULT, &kerning);
+            kernoffset = kerning.x;
+        }
         max_keller = std::max(font.character_map.at(c).Size[1] - font.character_map.at(c).Bearing[1], max_keller);
         baseline_descent = std::max(font.character_map.at(c).Bearing[1], baseline_descent);
         auto it = font.character_map.find(c);
         if (it != font.character_map.end()) {
-            width += it->second.Advance * (1.0f / 64.0f);
+            if(*text){
+                width += (it->second.Advance + kernoffset) * (1.0f / 64.0f);
+            }
+            else{
+                width += it->second.Bearing[0] + it->second.Size[0];
+            }
         }
     }
+    //width += 10;
     int height = max_keller + baseline_descent;
     text = _text.c_str();
     //std::cout << width << "\n";
@@ -129,11 +189,22 @@ text_image draw_text(const std::string& _text, const Font& font) {
         auto it = font.character_map.find(c);
 
         if (it != font.character_map.end()) {
+            int cn = GetCodepointNext(text, &bytes);
+            int kernoffset = 0;
+            if(*text){
+                int cn = GetCodepointNext(text, &bytes);
+                FT_Vector kerning;
+                FT_UInt glyph1 = FT_Get_Char_Index(font.face, c);
+                FT_UInt glyph2 = FT_Get_Char_Index(font.face, cn);
+                FT_Get_Kerning(font.face, glyph1, glyph2, FT_KERNING_DEFAULT, &kerning);
+                kernoffset = kerning.x;
+            }
+            //std::cout << kerning.x << "\n";
             const Character& character = it->second;
             //draw_rectangle(character.tex, xPos, yPos, scale, col);
             draw_glyph_at(ret, xOffset, baseline_descent, it->second);
 
-            xOffset += character.Advance * (1.0f / 64.0f);
+            xOffset += (character.Advance + kernoffset) * (1.0f / 64.0f);
             
         }
     }
